@@ -16,12 +16,18 @@ os.makedirs("uploads", exist_ok=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
+        # 1. Create pgvector extension if running on PostgreSQL
         if engine.dialect.name == "postgresql":
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+
+        # 2. Create tables FIRST before altering columns
+        await conn.run_sync(Base.metadata.create_all)
+
+        # 3. Alter tables to add new columns if necessary
+        if engine.dialect.name == "postgresql":
             await conn.execute(text("ALTER TABLE wardrobe_items ADD COLUMN IF NOT EXISTS occasion VARCHAR(50);"))
             await conn.execute(text("ALTER TABLE wardrobe_items ADD COLUMN IF NOT EXISTS category_id INTEGER;"))
         elif engine.dialect.name == "sqlite":
-            # Add columns safely in SQLite ignoring errors if they already exist
             try:
                 await conn.execute(text("ALTER TABLE wardrobe_items ADD COLUMN occasion VARCHAR(50);"))
             except Exception:
@@ -31,7 +37,6 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
-        await conn.run_sync(Base.metadata.create_all)
     yield
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
@@ -49,7 +54,6 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(wardrobe.router, prefix="/api/v1/wardrobe", tags=["Wardrobe"])
-
 app.include_router(outfits.router, prefix="/api/v1/outfits", tags=["Outfits"])
 app.include_router(seed.router, prefix="/api/v1/dev", tags=["Developer Services"])
 
