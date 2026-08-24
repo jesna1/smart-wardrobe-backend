@@ -10,6 +10,7 @@ class Base(DeclarativeBase):
 engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
     echo=True,
+    poolclass=NullPool,
     connect_args={
         "prepared_statement_cache_size": 0,
         "statement_cache_size": 0,
