@@ -13,32 +13,32 @@ from alembic import context
 # 1. Load environment variables from .env
 load_dotenv()
 
-# 2. Extract and format DATABASE_URL for asyncpg
+# --- Add project root directory to sys.path ---
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 2. Import Base metadata and ALL models for Alembic autogenerate
+from app.core.database import Base
+# Ensure all your database models are imported here so Base.metadata detects them
+import app.models  # noqa: F401
+
+target_metadata = Base.metadata
+
+# 3. Extract and format DATABASE_URL for asyncpg
 db_url = os.getenv("DATABASE_URL", "")
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# 3. Alembic Config object setup
+# 4. Alembic Config object setup
 config = context.config
 
 if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+    # Escape % as %% to prevent ConfigParser interpolation errors
+    config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-
-# --- FIX: Add project root directory to sys.path ---
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# 4. Import your app's Base metadata and models
-from app.core.database import Base
-
-# Import your models here if they aren't imported in session.py so Alembic registers them:
-# import app.models
-
-target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
@@ -68,7 +68,11 @@ async def run_async_migrations() -> None:
         section,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args={"prepared_statement_cache_size": 0},  # Fix for Supabase Pooler (Port 6543)
+        connect_args={
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+            "prepared_statement_name_func": lambda: "",
+        },
     )
 
     async with connectable.connect() as connection:

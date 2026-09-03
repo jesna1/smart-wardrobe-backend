@@ -2,7 +2,8 @@ import itertools
 import json
 import asyncio
 from typing import List, Dict, Any, Optional
-import google.generativeai as genai
+
+from google import genai
 
 from app.models.wardrobe import WardrobeItem
 from app.services.color_theory import calculate_color_harmony

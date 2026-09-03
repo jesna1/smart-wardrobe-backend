@@ -1,5 +1,5 @@
 from typing import Optional
-import jwt
+from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,7 @@ oauth2_scheme = OAuth2PasswordBearer(
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
     token: Optional[str] = Depends(oauth2_scheme)
-) -> Optional[User]:
+) -> User:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -27,31 +27,39 @@ async def get_current_user(
         )
 
     try:
+        # Decode token using python-jose matching security.py
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM]
         )
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        user_id_str: str = payload.get("sub")
+        if not user_id_str:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload",
+                detail="Token payload missing user identifier ('sub')",
             )
-    except jwt.PyJWTError:
+        user_id = int(user_id_str)
+    except JWTError as e:
+        print(f"❌ [Auth JWT Error]: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail=f"Could not validate credentials: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user ID format in token claim",
+        )
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalars().first()
 
     if user is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user account no longer exists in database",
         )
 
     return user

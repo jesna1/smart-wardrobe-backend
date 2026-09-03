@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -40,7 +41,7 @@ async def upload_wardrobe_item(
 ):
     """
     Uploads a wardrobe item, attaches it to current_user, runs Gemini AI auto-tagging,
-    stores image via Cloudinary, and saves metadata to DB.
+    stores image via Cloudinary (non-blocking), and saves metadata to DB.
     """
     file_bytes = await file.read()
     if not file_bytes:
@@ -52,21 +53,27 @@ async def upload_wardrobe_item(
         try:
             ai_tags = await ai_vision_service.analyze_clothing_image(file_bytes)
         except Exception as e:
-            print(f"[AI Vision Warning] Tagging failed: {e}")
+            print(f"⚠️ [AI Vision Warning] Tagging failed: {e}")
 
-    # 2. Cloudinary / Fallback Image Upload
+    # 2. Cloudinary Upload (Executed off main thread to prevent event-loop blocking)
     image_url = ""
     try:
         if getattr(settings, "CLOUDINARY_CLOUD_NAME", None):
-            upload_result = cloudinary.uploader.upload(
+            upload_options = {"folder": "smart_wardrobe/items"}
+            if remove_bg:
+                upload_options["background_removal"] = "cloudinary_ai"
+
+            # Use asyncio.to_thread for synchronous Cloudinary call
+            upload_result = await asyncio.to_thread(
+                cloudinary.uploader.upload,
                 file_bytes,
-                folder="smart_wardrobe/items"
+                **upload_options
             )
             image_url = upload_result.get("secure_url", "")
         else:
             image_url = "https://res.cloudinary.com/demo/image/upload/sample.jpg"
     except Exception as e:
-        print(f"[Cloudinary Warning] Upload failed: {e}")
+        print(f"⚠️ [Cloudinary Warning] Upload failed: {e}")
         image_url = "https://res.cloudinary.com/demo/image/upload/sample.jpg"
 
     # 3. Resolve item attributes
@@ -76,8 +83,10 @@ async def upload_wardrobe_item(
     final_occasion = occasion or ai_tags.get("occasion") or "Casual"
     final_title = title or ai_tags.get("title") or f"{final_color.title()} {detected_cat.title()}"
 
-    # Resolve or create Category
-    db_category_id = category_id
+    # Sanitize category_id (Treat 0 or negative values as None)
+    db_category_id = category_id if (category_id and category_id > 0) else None
+
+    # Resolve or create Category dynamically
     if db_category_id is None:
         cat_stmt = select(Category).where(Category.name.ilike(detected_cat))
         cat_res = await db.execute(cat_stmt)
@@ -107,7 +116,7 @@ async def upload_wardrobe_item(
     await db.commit()
     await db.refresh(item)
 
-    # Fetch with relationship loaded
+    # Fetch item with Category relationship eagerly loaded
     stmt = (
         select(WardrobeItem)
         .options(selectinload(WardrobeItem.category))
@@ -124,7 +133,10 @@ async def upload_wardrobe_item(
         "season": full_item.season,
         "occasion": full_item.occasion,
         "category_id": full_item.category_id,
-        "category": {"id": full_item.category.id, "name": full_item.category.name} if full_item.category else None,
+        "category": {
+            "id": full_item.category.id,
+            "name": full_item.category.name
+        } if full_item.category else None,
         "ai_detected": ai_tags,
     }
 
@@ -139,7 +151,7 @@ async def get_wardrobe_items(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retrieves user's wardrobe items filtered by user_id and optional parameters.
+    Retrieves user's wardrobe items filtered by user_id and optional query parameters.
     """
     stmt = (
         select(WardrobeItem)
@@ -147,7 +159,7 @@ async def get_wardrobe_items(
         .where(WardrobeItem.user_id == current_user.id)
     )
 
-    if category_id:
+    if category_id and category_id > 0:
         stmt = stmt.where(WardrobeItem.category_id == category_id)
     if color:
         stmt = stmt.where(WardrobeItem.color.ilike(f"%{color}%"))
@@ -168,7 +180,10 @@ async def get_wardrobe_items(
             "season": item.season,
             "occasion": item.occasion,
             "category_id": item.category_id,
-            "category": {"id": item.category.id, "name": item.category.name} if item.category else None,
+            "category": {
+                "id": item.category.id,
+                "name": item.category.name
+            } if item.category else None,
         }
         for item in items
     ]
@@ -191,7 +206,10 @@ async def delete_wardrobe_item(
     item = result.scalars().first()
 
     if not item:
-        raise HTTPException(status_code=404, detail="Wardrobe item not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Wardrobe item not found."
+        )
 
     await db.delete(item)
     await db.commit()

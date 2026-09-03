@@ -9,6 +9,7 @@ from app.core.security import get_password_hash, verify_password, create_access_
 
 router = APIRouter()
 
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_in: UserRegister, db: AsyncSession = Depends(get_db)):
     try:
@@ -31,6 +32,7 @@ async def register(user_in: UserRegister, db: AsyncSession = Depends(get_db)):
             detail=f"Registration failed: {str(e)}"
         )
 
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -42,10 +44,14 @@ async def login(
         user = res.scalars().first()
 
         if not user or not verify_password(form_data.password, user.hashed_password):
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
-        return TokenResponse(access_token=access_token)
+        return TokenResponse(access_token=access_token, token_type="bearer")
     except HTTPException:
         raise
     except Exception as e:

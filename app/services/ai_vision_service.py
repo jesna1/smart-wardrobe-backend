@@ -3,17 +3,18 @@ import io
 import asyncio
 from typing import Dict, Any
 from PIL import Image
-import google.generativeai as genai
+from google import genai
 from app.core.config import settings
 
 
 class AIVisionService:
     def __init__(self):
-        if settings.GEMINI_API_KEY:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            self.model = genai.GenerativeModel("gemini-1.5-flash")
+        invalid_keys = {"", "your-gemini-api-key", "your-actual-gemini-api-key-here"}
+        if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY.strip() not in invalid_keys:
+            self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
             self.enabled = True
         else:
+            self.client = None
             self.enabled = False
 
     async def analyze_garment_bytes(self, image_bytes: bytes) -> Dict[str, Any]:
@@ -21,7 +22,7 @@ class AIVisionService:
         Analyzes raw garment image bytes and returns structured AI metadata.
         Falls back to default values if Gemini is disabled or fails.
         """
-        if not self.enabled:
+        if not self.enabled or not self.client:
             return self._fallback_metadata()
 
         try:
@@ -40,12 +41,18 @@ class AIVisionService:
             """
 
             response = await asyncio.to_thread(
-                self.model.generate_content,
-                [image, prompt],
-                generation_config={"response_mime_type": "application/json"}
+                self.client.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=[image, prompt],
             )
 
-            parsed = json.loads(response.text)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text.split("```json", 1)[1].rsplit("```", 1)[0].strip()
+            elif raw_text.startswith("```"):
+                raw_text = raw_text.split("```", 1)[1].rsplit("```", 1)[0].strip()
+
+            parsed = json.loads(raw_text)
             return parsed
         except Exception as e:
             print(f"[AI Vision Error] {e}")
@@ -58,7 +65,7 @@ class AIVisionService:
             "dominant_color": "black",
             "season": "All-Season",
             "occasion": "Casual",
-            "formality": "Casual"
+            "formality": "Casual",
         }
 
 
