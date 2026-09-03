@@ -3,7 +3,7 @@ import io
 import asyncio
 from typing import Dict, Any
 from PIL import Image
-import google.generativeai as genai
+from google import genai
 from app.core.config import settings
 
 
