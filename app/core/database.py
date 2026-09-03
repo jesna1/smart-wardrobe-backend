@@ -1,16 +1,17 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from app.core.config import settings
 from sqlalchemy.pool import NullPool
+from app.core.config import settings
 
 
 class Base(DeclarativeBase):
     pass
 
 
+# Enable query logging only during local development (DEBUG=True)
 engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
-    echo=True,
+    echo=settings.DEBUG,
     poolclass=NullPool,
     connect_args={
         "prepared_statement_cache_size": 0,

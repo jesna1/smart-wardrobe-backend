@@ -1,6 +1,6 @@
 import json
-from typing import List, Union
-from pydantic import field_validator
+from typing import List, Union, Optional
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,18 +12,18 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
-    # Database Configuration
-    DATABASE_URL: str
-    ASYNC_DATABASE_URL: str
+    # Database Configuration (Optional defaults allow auto-assembly)
+    DATABASE_URL: Optional[str] = None
+    ASYNC_DATABASE_URL: Optional[str] = None
 
     # External Service API Keys
     GEMINI_API_KEY: str = ""
     WEATHER_API_KEY: str = ""
 
     # Cloudinary Configuration
-    CLOUDINARY_CLOUD_NAME: str = "nyz80cs8"
-    CLOUDINARY_API_KEY: str = "281148338921636"
-    CLOUDINARY_API_SECRET: str = "OQ50vEjHkZk29WNql6hcNKR-n0o"
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
 
     # Security & JWT Token Config
     SECRET_KEY: str = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
@@ -41,6 +41,20 @@ class Settings(BaseSettings):
                 return json.loads(v)
             return [i.strip() for i in v.split(",")]
         return v
+
+    @model_validator(mode="after")
+    def assemble_db_connection(self) -> "Settings":
+        """Automatically derive ASYNC_DATABASE_URL if only DATABASE_URL is provided."""
+        if not self.ASYNC_DATABASE_URL and self.DATABASE_URL:
+            url = self.DATABASE_URL
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            self.ASYNC_DATABASE_URL = url
+        elif not self.DATABASE_URL and self.ASYNC_DATABASE_URL:
+            self.DATABASE_URL = self.ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",
