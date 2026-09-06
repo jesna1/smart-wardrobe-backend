@@ -2,6 +2,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.models.wardrobe import WardrobeItem
@@ -26,8 +27,11 @@ async def get_outfit_recommendations(
     weather_data = await weather_service.get_current_weather(lat, lon)
     temp_celsius = weather_data.get("temperature_c", 25.0)
 
-    # 2. Query stored wardrobe items
-    result = await db.execute(select(WardrobeItem))
+    # 2. Query stored wardrobe items with pre-loaded relationships
+    stmt = select(WardrobeItem).options(
+        selectinload(WardrobeItem.category)
+    )
+    result = await db.execute(stmt)
     items = result.scalars().all()
 
     if not items:
