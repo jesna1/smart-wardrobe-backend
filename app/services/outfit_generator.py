@@ -1,16 +1,25 @@
 import itertools
-import json
-import asyncio
 from typing import List, Dict, Any, Optional
-
-from google import genai
+from sqlalchemy.orm.attributes import instance_state
 
 from app.models.wardrobe import WardrobeItem
 from app.services.color_theory import calculate_color_harmony
-from app.core.config import settings
 
 
 class OutfitGeneratorService:
+    @staticmethod
+    def _get_category_name(item: WardrobeItem) -> str:
+        """
+        Safely retrieves category name without triggering SQLAlchemy lazy-loading.
+        """
+        try:
+            state = instance_state(item)
+            if "category" in state.dict and item.category is not None:
+                return (item.category.name or "").lower()
+        except Exception:
+            pass
+        return ""
+
     @staticmethod
     def filter_by_weather(items: List[WardrobeItem], temp_celsius: float) -> List[WardrobeItem]:
         filtered = []
@@ -50,7 +59,7 @@ class OutfitGeneratorService:
 
         for item in usable_items:
             cat_id = item.category_id or 0
-            cat_name = item.category.name.lower() if getattr(item, "category", None) else ""
+            cat_name = cls._get_category_name(item)
             title = (item.title or "").lower()
 
             if cat_id == 1 or cat_name in ["tops", "shirts", "t-shirts"] or any(k in title for k in ["shirt", "t-shirt", "top", "blouse"]):
@@ -66,8 +75,9 @@ class OutfitGeneratorService:
         if not tops or not bottoms:
             for item in items:
                 cat_id = item.category_id or 0
-                cat_name = item.category.name.lower() if getattr(item, "category", None) else ""
+                cat_name = cls._get_category_name(item)
                 title = (item.title or "").lower()
+
                 if (cat_id == 1 or cat_name in ["tops", "shirts"] or "top" in title) and item not in tops:
                     tops.append(item)
                 elif (cat_id == 2 or cat_name in ["bottoms", "pants"] or "pants" in title) and item not in bottoms:
