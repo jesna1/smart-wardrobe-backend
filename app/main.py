@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.health import HealthCheckResponse
 from app.api.v1.endpoints import wardrobe, outfits, seed, auth
+from app.api.v1.api import api_router
 
 os.makedirs("uploads", exist_ok=True)
 
@@ -26,7 +27,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
-
+app.include_router(api_router, prefix="/api/v1")
 # Enable CORS for Flutter mobile and web integration
 app.add_middleware(
     CORSMiddleware,
