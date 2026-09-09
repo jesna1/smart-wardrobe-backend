@@ -9,15 +9,12 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.health import HealthCheckResponse
-from app.api.v1.endpoints import wardrobe, outfits, seed, auth
 from app.api.v1.api import api_router
 
 os.makedirs("uploads", exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # DDL statements (ALTER TABLE, CREATE EXTENSION) should not run inside
-    # lifespan when running multi-worker Gunicorn servers to prevent DB lock contention.
     yield
 
 app = FastAPI(
@@ -27,7 +24,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
-app.include_router(api_router, prefix="/api/v1")
+
 # Enable CORS for Flutter mobile and web integration
 app.add_middleware(
     CORSMiddleware,
@@ -37,14 +34,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static files mount
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-app.include_router(wardrobe.router, prefix="/api/v1/wardrobe", tags=["Wardrobe"])
-app.include_router(outfits.router, prefix="/api/v1/outfits", tags=["Outfits"])
-app.include_router(seed.router, prefix="/api/v1/dev", tags=["Developer Services"])
+# Single entry point for all API v1 routes
+app.include_router(api_router, prefix="/api/v1")
 
-# Root endpoint to resolve 404 on base URL
+# Base / Health Endpoints
 @app.get("/", tags=["Root"])
 async def root():
     return {
@@ -54,7 +50,7 @@ async def root():
         "health": "/health",
     }
 
-@app.get("/health", response_model=HealthCheckResponse)
+@app.get("/health", response_model=HealthCheckResponse, tags=["Health Check"])
 async def health_check(db: AsyncSession = Depends(get_db)):
     db_status = "healthy"
     try:
