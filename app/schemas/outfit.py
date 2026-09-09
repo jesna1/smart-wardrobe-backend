@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.schemas.wardrobe import WardrobeItemResponse
 
@@ -19,6 +19,30 @@ class OutfitGenerateRequest(BaseModel):
 class DailyRecommendationRequest(BaseModel):
     city: str = Field(default="Doha", description="Target city for weather evaluation")
     occasion: str = Field(default="Workwear", description="Target occasion (e.g. Workwear, Casual, Formal)")
+
+class OutfitItemDetail(BaseModel):
+    id: int
+    title: str
+    image_url: Optional[str] = None
+    color: Optional[str] = None
+
+class OutfitRecommendationItems(BaseModel):
+    top: Optional[OutfitItemDetail] = None
+    bottom: Optional[OutfitItemDetail] = None
+    shoes: Optional[OutfitItemDetail] = None
+    outerwear: Optional[OutfitItemDetail] = None
+
+class OutfitRecommendationOption(BaseModel):
+    outfit_id: int
+    score: float
+    ai_rationale: str
+    items: OutfitRecommendationItems
+
+class OutfitRecommendationResponse(BaseModel):
+    weather: Dict[str, Any]
+    occasion: Optional[str] = None
+    total_generated: int
+    outfits: List[OutfitRecommendationOption]
 
 class OutfitResponse(OutfitBase):
     id: int

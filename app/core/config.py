@@ -1,7 +1,16 @@
 import json
+import logging
+from pathlib import Path
 from typing import List, Union, Optional
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("uvicorn")
+
+# Dynamically locate root project directory (where .env lives)
+# app/core/config.py -> app/core/ -> app/ -> project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+ENV_FILE_PATH = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -12,7 +21,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
-    # Database Configuration (Optional defaults allow auto-assembly)
+    # Database Configuration
     DATABASE_URL: Optional[str] = None
     ASYNC_DATABASE_URL: Optional[str] = None
 
@@ -43,8 +52,10 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def assemble_db_connection(self) -> "Settings":
-        """Automatically derive ASYNC_DATABASE_URL if only DATABASE_URL is provided."""
+    def validate_and_assemble_settings(self) -> "Settings":
+        """Assemble Async DB URL and verify crucial API keys."""
+
+        # 1. Database URL Auto-assembly
         if not self.ASYNC_DATABASE_URL and self.DATABASE_URL:
             url = self.DATABASE_URL
             if url.startswith("postgres://"):
@@ -54,12 +65,19 @@ class Settings(BaseSettings):
             self.ASYNC_DATABASE_URL = url
         elif not self.DATABASE_URL and self.ASYNC_DATABASE_URL:
             self.DATABASE_URL = self.ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+        # 2. Check for missing Weather API key
+        if not self.WEATHER_API_KEY.strip():
+            logger.warning(
+                "⚠️ WEATHER_API_KEY is empty! Weather Service will return fallback data (25°C)."
+            )
+
         return self
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(str(ENV_FILE_PATH), ".env"),
         env_file_encoding="utf-8",
-        case_sensitive=True,
+        case_sensitive=False,  # Accepts WEATHER_API_KEY or weather_api_key
         extra="ignore",
     )
 
