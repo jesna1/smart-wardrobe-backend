@@ -13,6 +13,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Hard negative constraints for athletic / sports activities
+SPORT_FORBIDDEN_KEYWORDS = {
+    "saree", "sari", "dress", "gown", "anarkali", "lehenga", "kaftan", 
+    "suit", "blazer", "skirt", "heels", "loafers", "dupatta", "formal"
+}
+
 
 class OutfitGeneratorService:
     @staticmethod
@@ -63,23 +69,49 @@ class OutfitGeneratorService:
         filtered = []
         for item in items:
             season = (item.season or "").lower()
-            if temp_celsius >= 28.0 and season in ["winter", "heavy"]:
+            title = (item.title or "").lower()
+
+            # Extreme Heat (> 35°C): Filter out heavy, winter, and multi-layered draped garments like Sarees
+            if temp_celsius > 35.0:
+                if season in ["winter", "heavy"] or any(k in title for k in ["saree", "sari", "coat", "jacket", "wool", "sweater"]):
+                    continue
+            # Cold Weather (< 15°C): Filter out summer and sheer items
+            elif temp_celsius <= 15.0:
+                if season in ["summer", "sheer"]:
+                    continue
+            # Warm Weather (>= 28°C)
+            elif temp_celsius >= 28.0 and season in ["winter", "heavy"]:
                 continue
-            elif temp_celsius <= 15.0 and season in ["summer", "sheer"]:
-                continue
+
             filtered.append(item)
         return filtered
 
-    @staticmethod
-    def filter_by_occasion(items: List[WardrobeItem], occasion: Optional[str]) -> List[WardrobeItem]:
+    @classmethod
+    def filter_by_occasion(cls, items: List[WardrobeItem], occasion: Optional[str]) -> List[WardrobeItem]:
         if not occasion or not occasion.strip():
             return items
 
         target = occasion.strip().lower()
+
+        # Hard Rule: For sport / workout occasions, strictly reject forbidden categories
+        if target in ["sport", "sports", "workout", "gym", "activewear"]:
+            valid_items = []
+            for item in items:
+                title = (item.title or "").lower()
+                cat_name = cls._get_category_name(item)
+                
+                # Check for forbidden keywords in title or category
+                if any(k in title for k in SPORT_FORBIDDEN_KEYWORDS) or any(k in cat_name for k in SPORT_FORBIDDEN_KEYWORDS):
+                    continue
+                valid_items.append(item)
+            items = valid_items
+
         matching = [
             item for item in items 
             if item.occasion and item.occasion.strip().lower() == target
         ]
+
+        # Return matching items if available, else return the filtered safe item pool
         return matching if len(matching) >= 2 else items
 
     @classmethod
@@ -93,7 +125,7 @@ class OutfitGeneratorService:
         usable_items = cls.filter_by_weather(items, temp_celsius)
         usable_items = cls.filter_by_occasion(usable_items, occasion)
 
-        # 1. Group items into functional buckets
+        # Group items into functional buckets
         buckets: Dict[str, List[WardrobeItem]] = {
             "one_piece": [], "tops": [], "bottoms": [], "shoes": [], "outerwear": []
         }
@@ -106,18 +138,20 @@ class OutfitGeneratorService:
         needs_outerwear = temp_celsius < 18.0 and len(buckets["outerwear"]) > 0
         outerwear_list = buckets["outerwear"] if needs_outerwear else [None]
 
-        # 2. Build Stream A: One-Piece Outfits (Saree/Dress + Shoes + Optional Layer)
-        for piece in buckets["one_piece"]:
-            for shoe, layer in itertools.product(shoes_list, outerwear_list):
-                candidates.append({
-                    "type": "one_piece",
-                    "top": piece,
-                    "bottom": None,
-                    "shoes": shoe,
-                    "outerwear": layer
-                })
+        # Stream A: One-Piece Outfits (Disallowed if occasion is Sport)
+        is_sport = (occasion or "").strip().lower() in ["sport", "sports", "workout", "gym", "activewear"]
+        if not is_sport:
+            for piece in buckets["one_piece"]:
+                for shoe, layer in itertools.product(shoes_list, outerwear_list):
+                    candidates.append({
+                        "type": "one_piece",
+                        "top": piece,
+                        "bottom": None,
+                        "shoes": shoe,
+                        "outerwear": layer
+                    })
 
-        # 3. Build Stream B: Two-Piece Outfits (Top + Bottom + Shoes + Optional Layer)
+        # Stream B: Two-Piece Outfits
         for top, bottom in itertools.product(buckets["tops"], buckets["bottoms"]):
             for shoe, layer in itertools.product(shoes_list, outerwear_list):
                 candidates.append({
@@ -131,10 +165,10 @@ class OutfitGeneratorService:
         if not candidates:
             return []
 
-        # Limit candidate pool sent to Gemini to max 12 items for fast latency
+        # Limit candidate pool sent to Gemini to max 12 items
         evaluation_pool = candidates[:12]
 
-        # 4. Evaluate using Gemini 2.5 Flash
+        # Evaluate using Gemini
         ai_results = await cls._evaluate_candidates_with_gemini(
             candidates=evaluation_pool,
             temp_celsius=temp_celsius,
@@ -154,7 +188,7 @@ class OutfitGeneratorService:
         api_key = getattr(settings, "GEMINI_API_KEY", None)
         if not api_key:
             logger.warning("GEMINI_API_KEY unset. Falling back to heuristic scoring.")
-            return cls._heuristic_fallback(candidates, temp_celsius)
+            return cls._heuristic_fallback(candidates, temp_celsius, occasion)
 
         try:
             client = genai.Client(api_key=api_key)
@@ -176,10 +210,10 @@ class OutfitGeneratorService:
             Candidates:
             {json.dumps(payload_items, indent=2)}
 
-            Rules:
-            1. Sarees, Dresses, and One-Piece garments MUST NOT be combined with bottom-wear like pants or skirts.
-            2. Rate each candidate from 0 to 100 for aesthetic harmony, silhouette balance, and occasion appropriateness.
-            3. Set 'is_valid' to false for incompatible items (e.g., formal blazer with gym shorts).
+            STRICT CONSTRAINTS:
+            1. Sarees, Dresses, Gowns, and Formal Wear MUST NOT be recommended for 'Sport' or 'Workout' occasions. Set 'is_valid': false for these.
+            2. Sarees and heavy multi-layered garments MUST NOT be recommended for extreme heat (>35°C). Set 'is_valid': false or score under 20.
+            3. Rate valid candidates from 0 to 100 based on aesthetic harmony, weather practicality, and occasion appropriateness.
             4. Provide a 1-sentence personalized styling rationale for each valid outfit.
 
             Respond strictly in valid JSON format matching this schema:
@@ -187,8 +221,8 @@ class OutfitGeneratorService:
               {{
                 "candidate_id": 1,
                 "is_valid": true,
-                "score": 90.0,
-                "ai_rationale": "An elegant white saree paired with minimal footwear creates a graceful look for formal wear."
+                "score": 88.0,
+                "ai_rationale": "Lightweight athletic top and shorts combination perfect for sports in hot weather."
               }}
             ]
             """
@@ -213,19 +247,34 @@ class OutfitGeneratorService:
                     c["ai_rationale"] = eval_data.get("ai_rationale", f"Curated outfit styled for {occasion}.")
                     evaluated_outfits.append(c)
 
-            return evaluated_outfits if evaluated_outfits else cls._heuristic_fallback(candidates, temp_celsius)
+            return evaluated_outfits if evaluated_outfits else cls._heuristic_fallback(candidates, temp_celsius, occasion)
 
         except Exception as e:
             logger.error(f"Gemini evaluation failed: {e}", exc_info=True)
-            return cls._heuristic_fallback(candidates, temp_celsius)
+            return cls._heuristic_fallback(candidates, temp_celsius, occasion)
 
     @classmethod
-    def _heuristic_fallback(cls, candidates: List[Dict[str, Any]], temp_celsius: float) -> List[Dict[str, Any]]:
+    def _heuristic_fallback(
+        cls, 
+        candidates: List[Dict[str, Any]], 
+        temp_celsius: float,
+        occasion: str = "Casual"
+    ) -> List[Dict[str, Any]]:
         evaluated = []
+        is_sport = occasion.strip().lower() in ["sport", "sports", "workout", "gym", "activewear"]
+
         for c in candidates:
             top = c["top"]
             bottom = c["bottom"]
             shoe = c["shoes"]
+
+            top_title = (top.title or "").lower()
+
+            # Heavy penalty if Saree / Dress somehow reaches heuristic for Sport or extreme heat
+            if is_sport and any(k in top_title for k in SPORT_FORBIDDEN_KEYWORDS):
+                continue
+            if temp_celsius > 35.0 and any(k in top_title for k in ["saree", "sari", "heavy", "wool"]):
+                continue
 
             c_top = top.color or "white"
             c_bottom = bottom.color if bottom else c_top
