@@ -50,7 +50,7 @@ async def get_outfit_recommendations(
             }
 
         # 3. Generate outfits scored by weather and color harmony
-        generated_outfits = OutfitGeneratorService.generate_outfits(
+        generated_outfits = await OutfitGeneratorService.generate_outfits(
             items=list(items),
             temp_celsius=temp_celsius,
             occasion=occasion,
