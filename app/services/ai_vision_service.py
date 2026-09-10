@@ -31,9 +31,9 @@ class AIVisionService:
             Analyze this clothing item photo and extract structured garment metadata.
             Return ONLY a JSON object with these exact keys:
             {
-              "title": "Short descriptive name (e.g., Navy Blue Blazer, Kerala Cotton Saree)",
-              "category": "Tops" | "Bottoms" | "Shoes" | "Outerwear" | "Accessories" | "Sarees" | "One-Piece",
-              "dominant_color": "color name (e.g., navy, white, beige, black, olive, teal)",
+              "title": "Short descriptive name (e.g., Navy Blue Blazer)",
+              "category": "Tops" | "Bottoms" | "Shoes" | "Outerwear" | "Accessories",
+              "dominant_color": "color name (e.g., navy, white, beige, black, olive)",
               "season": "Summer" | "Winter" | "Spring/Autumn" | "All-Season",
               "occasion": "Casual" | "Work" | "Formal" | "Party" | "Sport",
               "formality": "Casual" | "Smart Casual" | "Formal"
