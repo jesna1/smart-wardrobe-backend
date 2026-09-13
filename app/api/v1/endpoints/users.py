@@ -1,8 +1,8 @@
-# app/api/v1/endpoints/users.py
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import get_db
 from app.models.user import User
@@ -18,6 +18,22 @@ class UserPreferenceInput(BaseModel):
     skin_type: str       # e.g., "Combination", "Dry", "Sensitive"
     body_shape: str      # e.g., "Hourglass", "Rectangle", "Pear", "Inverted Triangle"
 
+def format_profile_response(user: User, profile: UserProfile) -> dict:
+    return {
+        "name": user.full_name or "User",
+        "role": profile.role,
+        "location": profile.location,
+        "skin_type": profile.skin_type,
+        "skin_undertone": profile.skin_undertone,
+        "seasonal_color_type": profile.seasonal_color_type,
+        "body_shape": profile.body_shape,
+        "style_archetype": profile.style_archetype,
+        "palette_name": profile.palette_name,
+        "palette_swatches": profile.palette_swatches,
+        "preferred_styles": profile.preferred_styles,
+        "body_shape_tips": profile.body_shape_tips,
+    }
+
 @router.get("/me/profile")
 async def get_my_profile(
     current_user: User = Depends(get_current_user),
@@ -32,20 +48,7 @@ async def get_my_profile(
         await db.commit()
         await db.refresh(profile)
 
-    return {
-        "name": current_user.full_name,
-        "role": profile.role,
-        "location": profile.location,
-        "skin_type": profile.skin_type,
-        "skin_undertone": profile.skin_undertone,
-        "seasonal_color_type": profile.seasonal_color_type,
-        "body_shape": profile.body_shape,
-        "style_archetype": profile.style_archetype,
-        "palette_name": profile.palette_name,
-        "palette_swatches": profile.palette_swatches,
-        "preferred_styles": profile.preferred_styles,
-        "body_shape_tips": profile.body_shape_tips,
-    }
+    return format_profile_response(current_user, profile)
 
 @router.post("/me/reanalyze-style")
 async def reanalyze_user_style(
@@ -83,7 +86,13 @@ async def reanalyze_user_style(
     profile.preferred_styles = analysis["preferred_styles"]
     profile.body_shape_tips = analysis["body_shape_tips"]
 
+    # Explicitly flag modified JSON columns so SQLAlchemy commits array changes
+    flag_modified(profile, "palette_swatches")
+    flag_modified(profile, "preferred_styles")
+    flag_modified(profile, "body_shape_tips")
+
     await db.commit()
     await db.refresh(profile)
 
-    return {"message": "Style profile successfully reanalyzed and updated."}
+    # Return updated profile payload directly to Flutter
+    return format_profile_response(current_user, profile)
