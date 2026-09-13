@@ -1,4 +1,3 @@
-import itertools
 from typing import List
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,119 +16,98 @@ router = APIRouter()
 
 @router.get("/recommendations", response_model=StylistRecommendationResponse)
 async def get_stylist_recommendations(
-    occasion: str = Query("Work", description="Target occasion (e.g. Work, Casual, Formal, Evening, Gym)"),
+    occasion: str = Query("Work", description="Target occasion"),
     db: AsyncSession = Depends(get_db)
 ):
     try:
-        # 1. Contextual weather info (e.g. Doha context)
+        # 1. Weather Context
         weather_data = WeatherInfo(
-            temperature_c=32.0,
-            condition="Sunny & Clear",
-            location="Doha, Qatar",
-            humidity=50,
-            icon_code="01d"
+            temperature_c=38.4,
+            temperature_f=101.1,
+            condition="Sunny",
+            humidity=33,
+            wind_kph=15.1,
+            season_category="Summer",
+            location="Al Bida` Al Gharbiyah",
+            icon_code="01d",
+            is_fallback=False
         )
 
-        # 2. Fetch wardrobe items asynchronously from database
+        # 2. Fetch wardrobe items asynchronously
         result = await db.execute(select(WardrobeItem))
         db_items = result.scalars().all()
 
-        # Transform DB items into schema items
         user_items: List[RecommendedItem] = []
         for item in db_items:
             user_items.append(
                 RecommendedItem(
                     id=int(item.id) if str(item.id).isdigit() else hash(item.id) % 10000,
                     title=getattr(item, "title", "Wardrobe Item"),
-                    category=getattr(item, "category", "top").lower(),
+                    category=str(getattr(item, "category", "top")).lower(),
                     image_url=getattr(item, "image_url", None),
-                    color=getattr(item, "color", "Neutral"),
+                    color=getattr(item, "color", "Multi"),
                 )
             )
 
-        # Fallback inventory seed if database has fewer than 3 items
-        if len(user_items) < 3:
+        # Fallback inventory if wardrobe is empty or small
+        if len(user_items) < 2:
             user_items = [
                 RecommendedItem(
                     id=101,
-                    title="Tailored Navy Blazer",
+                    title="Tailored Shirt",
                     category="top",
-                    image_url="https://images.unsplash.com/photo-1594938298603-c8148c4dae35",
-                    color="Navy"
+                    image_url="https://res.cloudinary.com/nyz80cs8/image/upload/v1788695922/smart_wardrobe/items/rhzj9o5zbbwo53yuyo9n.png",
+                    color="Multi"
                 ),
                 RecommendedItem(
                     id=102,
-                    title="White Linen Shirt",
-                    category="top",
-                    image_url="https://images.unsplash.com/photo-1598033129183-c4f50c736f10",
-                    color="White"
-                ),
-                RecommendedItem(
-                    id=103,
-                    title="Slim-fit Chino Trousers",
+                    title="Formal Trousers",
                     category="bottom",
-                    image_url="https://images.unsplash.com/photo-1473966968600-fa801b869a1a",
-                    color="Beige"
-                ),
-                RecommendedItem(
-                    id=104,
-                    title="Classic Leather Loafers",
-                    category="footwear",
-                    image_url="https://images.unsplash.com/photo-1533867617858-e7b97e060509",
-                    color="Brown"
+                    image_url="https://res.cloudinary.com/nyz80cs8/image/upload/v1788696031/smart_wardrobe/items/c9knhwnqvtwxtpruaecm.png",
+                    color="Multi"
                 ),
             ]
 
-        # 3. Group items into outfit slots
-        tops = [i for i in user_items if i.category in ["top", "shirt", "blouse", "jacket", "blazer"]]
-        bottoms = [i for i in user_items if i.category in ["bottom", "pants", "trousers", "skirt", "shorts"]]
-        shoes = [i for i in user_items if i.category in ["footwear", "shoes", "sneakers", "loafers"]]
+        # 3. Separate by category
+        tops = [i for i in user_items if i.category in ["top", "shirt", "blouse", "jacket", "blazer"]] or user_items[:1]
+        bottoms = [i for i in user_items if i.category in ["bottom", "pants", "trousers", "skirt", "pant"]] or user_items[1:2]
+        shoes = [i for i in user_items if i.category in ["shoes", "footwear", "sneakers", "loafers"]]
 
-        # Ensure fallback lists have at least one item per category
-        if not tops:
-            tops = user_items[:1]
-        if not bottoms:
-            bottoms = user_items[1:2] if len(user_items) > 1 else user_items[:1]
-        if not shoes:
-            shoes = user_items[2:3] if len(user_items) > 2 else user_items[:1]
-
-        # 4. Generate dynamic outfit combinations
+        # 4. Assemble outfit recommendations
         recommendations: List[OutfitRecommendation] = []
-        outfit_counter = 1
+        counter = 1
 
-        for top, bottom, shoe in itertools.product(tops, bottoms, shoes):
-            if outfit_counter > 3:
-                break
+        for top in tops:
+            for bottom in bottoms:
+                if counter > 3:
+                    break
+                
+                combo = [top, bottom]
+                if shoes:
+                    combo.append(shoes[0])
 
-            # Calculate dynamic score & rationale based on weather & occasion
-            match_score = 92 if occasion.lower() in ["work", "formal"] else 88
-            rationale = (
-                f"Lightweight {top.color} {top.title.lower()} paired with {bottom.title.lower()} "
-                f"provides breathability in {weather_data.temperature_c:.0f}°C weather while maintaining a polished {occasion.lower()} look."
-            )
-
-            recommendations.append(
-                OutfitRecommendation(
-                    outfit_id=1000 + outfit_counter,
-                    title=f"Curated {occasion} Ensemble #{outfit_counter}",
-                    occasion=occasion,
-                    match_score=match_score - (outfit_counter * 2),
-                    ai_rationale=rationale,
-                    is_saved=False,
-                    items=[top, bottom, shoe],
+                recommendations.append(
+                    OutfitRecommendation(
+                        outfit_id=counter,
+                        title=f"Curated {occasion.capitalize()} Look #{counter}",
+                        occasion=occasion.capitalize(),
+                        match_score=92,
+                        ai_rationale=f"Harmonious combination featuring {top.title} selected for {weather_data.temperature_c}°C weather.",
+                        is_saved=False,
+                        items=combo
+                    )
                 )
-            )
-            outfit_counter += 1
+                counter += 1
 
-        return {
-            "status": "success",
-            "occasion": occasion,
-            "weather": weather_data,
-            "recommendations": recommendations,
-        }
+        return StylistRecommendationResponse(
+            weather=weather_data,
+            occasion=occasion,
+            total_generated=len(recommendations),
+            recommendations=recommendations
+        )
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate stylist recommendations: {str(e)}"
+            detail=f"Stylist recommendation error: {str(e)}"
         )
