@@ -1,13 +1,13 @@
 import logging
 from typing import Any, Dict, List
-import google.generativeai as genai
+
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-if getattr(settings, "GEMINI_API_KEY", None):
-    genai.configure(api_key=settings.GEMINI_API_KEY)
 
 
 class StyleAnalysisResponse(BaseModel):
@@ -57,10 +57,16 @@ async def analyze_user_style_and_aesthetics(
     """
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = await model.generate_content_async(
-            prompt,
-            generation_config=genai.GenerationConfig(
+        api_key = getattr(settings, "GEMINI_API_KEY", None)
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY is not configured.")
+
+        client = genai.Client(api_key=api_key)
+
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=StyleAnalysisResponse,
                 temperature=0.3,
