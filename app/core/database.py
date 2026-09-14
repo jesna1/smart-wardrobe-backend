@@ -9,14 +9,13 @@ class Base(DeclarativeBase):
     pass
 
 
-# Enable query logging only during local development (DEBUG=True)
 engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
     echo=settings.DEBUG,
     poolclass=NullPool,
-    prepared_statement_cache_size=0,  # SQLAlchemy dialect level cache
     connect_args={
-        "statement_cache_size": 0,  # asyncpg driver level cache
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
     },
 )
 
