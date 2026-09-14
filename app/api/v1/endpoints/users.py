@@ -21,17 +21,18 @@ class UserPreferenceInput(BaseModel):
 def format_profile_response(user: User, profile: UserProfile) -> dict:
     return {
         "name": user.full_name or "User",
-        "role": profile.role,
-        "location": profile.location,
+        "role": getattr(profile, "role", "Senior Application Developer"),
+        "location": getattr(profile, "location", "Doha, Qatar"),
         "skin_type": profile.skin_type,
         "skin_undertone": profile.skin_undertone,
         "seasonal_color_type": profile.seasonal_color_type,
         "body_shape": profile.body_shape,
         "style_archetype": profile.style_archetype,
         "palette_name": profile.palette_name,
-        "palette_swatches": profile.palette_swatches,
-        "preferred_styles": profile.preferred_styles,
-        "body_shape_tips": profile.body_shape_tips,
+        "palette_swatches": profile.palette_swatches or [],
+        "preferred_styles": profile.preferred_styles or [],
+        "body_shape_tips": profile.body_shape_tips or [],
+        "wardrobe_insights": getattr(profile, "wardrobe_insights", []),
     }
 
 @router.get("/me/profile")
@@ -56,7 +57,7 @@ async def reanalyze_user_style(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Fetch wardrobe items for AI context
+    # Fetch user's wardrobe items for Gemini analysis context
     result = await db.execute(select(WardrobeItem).where(WardrobeItem.user_id == current_user.id))
     wardrobe_items = result.scalars().all()
     items_payload = [{"category": i.category, "color": i.color, "tags": i.tags} for i in wardrobe_items]
@@ -85,14 +86,18 @@ async def reanalyze_user_style(
     profile.style_archetype = analysis["style_archetype"]
     profile.preferred_styles = analysis["preferred_styles"]
     profile.body_shape_tips = analysis["body_shape_tips"]
+    
+    if hasattr(profile, "wardrobe_insights"):
+        profile.wardrobe_insights = analysis.get("wardrobe_insights", [])
 
-    # Explicitly flag modified JSON columns so SQLAlchemy commits array changes
+    # Explicitly flag modified JSON columns for SQLAlchemy async tracking
     flag_modified(profile, "palette_swatches")
     flag_modified(profile, "preferred_styles")
     flag_modified(profile, "body_shape_tips")
+    if hasattr(profile, "wardrobe_insights"):
+        flag_modified(profile, "wardrobe_insights")
 
     await db.commit()
     await db.refresh(profile)
 
-    # Return updated profile payload directly to Flutter
     return format_profile_response(current_user, profile)
