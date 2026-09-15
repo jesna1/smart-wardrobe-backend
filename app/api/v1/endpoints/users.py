@@ -21,41 +21,53 @@ class UserPreferenceInput(BaseModel):
 
 
 def format_profile_response(user: User, profile: UserProfile) -> dict:
+    # Use getattr to safely guard against missing model columns or null values
     return {
-        "name": user.full_name or "User",
-        "role": profile.role or "Senior Application Developer",
-        "location": profile.location or "Doha, Qatar",
-        "skin_type": profile.skin_type,
-        "skin_undertone": profile.skin_undertone,
-        "seasonal_color_type": profile.seasonal_color_type,
-        "body_shape": profile.body_shape,
-        "style_archetype": profile.style_archetype,
-        "palette_name": profile.palette_name,
-        "palette_swatches": profile.palette_swatches or [],
-        "preferred_styles": profile.preferred_styles or [],
-        "body_shape_tips": profile.body_shape_tips or [],
-        "wardrobe_insights": profile.wardrobe_insights or [],
+        "name": getattr(user, "full_name", None) or getattr(user, "name", "User"),
+        "role": getattr(profile, "role", None) or "Senior Application Developer",
+        "location": getattr(profile, "location", None) or "Doha, Qatar",
+        "skin_type": getattr(profile, "skin_type", None),
+        "skin_undertone": getattr(profile, "skin_undertone", None),
+        "seasonal_color_type": getattr(profile, "seasonal_color_type", None),
+        "body_shape": getattr(profile, "body_shape", None),
+        "style_archetype": getattr(profile, "style_archetype", None),
+        "palette_name": getattr(profile, "palette_name", None),
+        "palette_swatches": getattr(profile, "palette_swatches", None) or [],
+        "preferred_styles": getattr(profile, "preferred_styles", None) or [],
+        "body_shape_tips": getattr(profile, "body_shape_tips", None) or [],
+        "wardrobe_insights": getattr(profile, "wardrobe_insights", None) or [],
     }
-
 
 @router.get("/me/profile")
 async def get_my_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(UserProfile).where(UserProfile.user_id == current_user.id)
-    )
-    profile = result.scalars().first()
+    try:
+        result = await db.execute(
+            select(UserProfile).where(UserProfile.user_id == current_user.id)
+        )
+        profile = result.scalars().first()
 
-    if not profile:
-        profile = UserProfile(user_id=current_user.id)
-        db.add(profile)
-        await db.commit()
-        await db.refresh(profile)
+        if not profile:
+            # Instantiate with optional default placeholders if non-nullable
+            profile = UserProfile(
+                user_id=current_user.id,
+                skin_type="Sensitive",
+                skin_undertone="Olive",
+                body_shape="Apple",
+            )
+            db.add(profile)
+            await db.commit()
+            await db.refresh(profile)
 
-    return format_profile_response(current_user, profile)
-
+        return format_profile_response(current_user, profile)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch profile: {str(e)}",
+        )
 @router.post("/me/reanalyze-style")
 async def reanalyze_user_style(
     preferences: UserPreferenceInput,
