@@ -15,5 +15,10 @@ class User(Base):
     is_superuser = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Direct relationship matching WardrobeItem.user
-    wardrobe_items = relationship("WardrobeItem", back_populates="user", cascade="all, delete-orphan")
+    # Relationships
+    wardrobe_items = relationship(
+        "WardrobeItem", back_populates="user", cascade="all, delete-orphan"
+    )
+    profile = relationship(
+        "UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
