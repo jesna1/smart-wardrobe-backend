@@ -5,7 +5,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-
+from sqlalchemy.orm import configure_mappers
+import app.models
+configure_mappers()
 from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.health import HealthCheckResponse
