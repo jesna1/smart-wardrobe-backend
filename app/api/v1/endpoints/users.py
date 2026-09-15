@@ -56,30 +56,46 @@ async def get_my_profile(
 
     return format_profile_response(current_user, profile)
 
-
 @router.post("/me/reanalyze-style")
 async def reanalyze_user_style(
     preferences: UserPreferenceInput,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Fetch user's wardrobe items for Gemini analysis context
+    # Safe extraction of wardrobe items with null guards
     result = await db.execute(
         select(WardrobeItem).where(WardrobeItem.user_id == current_user.id)
     )
     wardrobe_items = result.scalars().all()
     items_payload = [
-        {"category": i.category, "color": i.color, "tags": i.tags}
+        {
+            "category": getattr(i, "category", "") or "",
+            "color": getattr(i, "color", "") or "",
+            "tags": getattr(i, "tags", []) or [],
+        }
         for i in wardrobe_items
     ]
 
-    # Run AI analysis engine
-    analysis = await analyze_user_style_and_aesthetics(
-        skin_undertone=preferences.skin_undertone,
-        skin_type=preferences.skin_type,
-        body_shape=preferences.body_shape,
-        wardrobe_items=items_payload,
-    )
+    # Execute AI engine with exception boundary
+    try:
+        analysis = await analyze_user_style_and_aesthetics(
+            skin_undertone=preferences.skin_undertone,
+            skin_type=preferences.skin_type,
+            body_shape=preferences.body_shape,
+            wardrobe_items=items_payload,
+        )
+        if not isinstance(analysis, dict):
+            raise ValueError("AI analysis returned an invalid non-dictionary payload.")
+    except KeyError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported style preference option: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Style re-analysis engine failed: {str(e)}",
+        )
 
     # Fetch or create user profile
     res = await db.execute(
@@ -90,23 +106,22 @@ async def reanalyze_user_style(
         profile = UserProfile(user_id=current_user.id)
         db.add(profile)
 
-    # Persist updated profile results
+    # Safe updates using dict.get() defaults
     profile.skin_undertone = preferences.skin_undertone
     profile.skin_type = preferences.skin_type
     profile.body_shape = preferences.body_shape
-    profile.seasonal_color_type = analysis["seasonal_color_type"]
-    profile.palette_name = analysis["palette_name"]
-    profile.palette_swatches = analysis["palette_swatches"]
-    profile.style_archetype = analysis["style_archetype"]
-    profile.preferred_styles = analysis["preferred_styles"]
-    profile.body_shape_tips = analysis["body_shape_tips"]
+    profile.seasonal_color_type = analysis.get("seasonal_color_type", "Deep Autumn")
+    profile.palette_name = analysis.get("palette_name", "Warm Earth Tones")
+    profile.palette_swatches = analysis.get("palette_swatches", [])
+    profile.style_archetype = analysis.get("style_archetype", "Classic Elegant")
+    profile.preferred_styles = analysis.get("preferred_styles", [])
+    profile.body_shape_tips = analysis.get("body_shape_tips", [])
     profile.wardrobe_insights = analysis.get("wardrobe_insights", [])
 
-    # Explicitly flag modified JSON columns for SQLAlchemy async tracking
-    flag_modified(profile, "palette_swatches")
-    flag_modified(profile, "preferred_styles")
-    flag_modified(profile, "body_shape_tips")
-    flag_modified(profile, "wardrobe_insights")
+    # Explicitly flag modified JSON columns for SQLAlchemy tracking
+    json_fields = ["palette_swatches", "preferred_styles", "body_shape_tips", "wardrobe_insights"]
+    for field in json_fields:
+        flag_modified(profile, field)
 
     await db.commit()
     await db.refresh(profile)
